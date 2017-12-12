@@ -1,0 +1,234 @@
+C51 COMPILER V9.53.0.0   SMBUS                                                             12/12/2017 13:32:32 PAGE 1   
+
+
+C51 COMPILER V9.53.0.0, COMPILATION OF MODULE SMBUS
+OBJECT MODULE PLACED IN .\src\smbus.OBJ
+COMPILER INVOKED BY: c:\SiliconLabs\SimplicityStudio\v4\developer\toolchains\keil_8051\9.53\BIN\C51.exe C:\Users\pnisbet
+                    -\Documents\Silabs_Workspace\Meat_Curer\src\smbus.c SMALL DEBUG OBJECTEXTEND ROM(LARGE) WARNINGLEVEL(2) FLOATFUZZY(3) OPT
+                    -IMIZE(8,SPEED) DEFINE(DEBUG=1) INTVECTOR(0X0000) INTPROMOTE INCDIR(C:\Users\pnisbet\Documents\Silabs_Workspace\Meat_Cure
+                    -r\inc;C:/SiliconLabs/SimplicityStudio/v4/developer/sdks/8051/v4.0.9//kits/common/drivers/efm8_retargetserial;C:/SiliconL
+                    -abs/SimplicityStudio/v4/developer/sdks/8051/v4.0.9//Device/shared/si8051base;C:/SiliconLabs/SimplicityStudio/v4/develope
+                    -r/sdks/8051/v4.0.9//Device/EFM8SB1/inc;C:/SiliconLabs/SimplicityStudio/v4/developer/sdks/8051/v4.0.9/kits/common/bsp;C:/
+                    -SiliconLabs/SimplicityStudio/v4/developer/sdks/8051/v4.0.9//kits/EFM8SB1_SLSTK2010A/config;C:/SiliconLabs/SimplicityStud
+                    -io/v4/developer/sdks/8051/v4.0.9//kits/common/bsp) PRINT(.\src\smbus.lst) COND PAGEWIDTH(120) PAGELENGTH(65) OBJECT(.\sr
+                    -c\smbus.OBJ)
+
+line level    source
+
+   1          //-----------------------------------------------------------------------------
+   2          // smbus.c
+   3          //-----------------------------------------------------------------------------
+   4          // Copyright 2014 Silicon Laboratories, Inc.
+   5          // http://developer.silabs.com/legal/version/v11/Silicon_Labs_Software_License_Agreement.txt
+   6          //
+   7          //-----------------------------------------------------------------------------
+   8          // Includes
+   9          //-----------------------------------------------------------------------------
+  10          #include "bsp.h"
+  11          #include "smbus.h"
+  12          
+  13          //-----------------------------------------------------------------------------
+  14          // Global CONSTANTS
+  15          //-----------------------------------------------------------------------------
+  16          // Device addresses (7 bits, LSB is a don't care)
+  17          #define  SLAVE_ADDR     0x80           // Device address for slave target
+  18          
+  19          //-----------------------------------------------------------------------------
+  20          // Global VARIABLES
+  21          //-----------------------------------------------------------------------------
+  22          uint8_t SMB_DATA_IN;                   // Global holder for SMBus data
+  23                                                 // All receive data is written here
+  24          
+  25          uint8_t SMB_DATA_OUT;                  // Global holder for SMBus data.
+  26                                                 // All transmit data is read from here
+  27          
+  28          uint8_t TARGET;                        // Target SMBus slave address
+  29          
+  30          volatile bool SMB_BUSY;                // Software flag to indicate when the
+  31                                                 // SMB_Read() or SMB_Write() functions
+  32                                                 // have claimed the SMBus
+  33          
+  34          volatile bool SMB_RW;                  // Software flag to indicate the
+  35                                                 // direction of the current transfer
+  36          
+  37          uint16_t NUM_ERRORS;                   // Counter for the number of errors.
+  38          //-----------------------------------------------------------------------------
+  39          // Function PROTOTYPES
+  40          //-----------------------------------------------------------------------------
+  41          // Functions used to communicate with the offchip temperature/humidity sensor
+  42          void ResetSensor();
+  43          //uint16_t MeasureAndReadTemperature();
+  44          uint16_t ReadTemperature();
+  45          uint16_t MeasureAndReadHumidity();
+  46          uint16_t SendSensorCommand(uint8_t command, bool readback);
+  47          
+  48          void SMB_Write (void);
+C51 COMPILER V9.53.0.0   SMBUS                                                             12/12/2017 13:32:32 PAGE 2   
+
+  49          void SMB_Read (void);
+  50          
+  51          //-----------------------------------------------------------------------------
+  52          // Sensor Functions
+  53          //-----------------------------------------------------------------------------
+  54          //#if 0
+  55          //---------------------------------------------------------------------------
+  56          // ResetSensor
+  57          //---------------------------------------------------------------------------
+  58          //
+  59          // Description - resets the offchip temperature/humidity sensor
+  60          //
+  61          //
+  62          // return - returns the measured temperature value.
+  63          void ResetSensor()
+  64          {
+  65   1          SendSensorCommand(0xFE, 0);
+  66   1      }
+  67          //#endif
+  68          //---------------------------------------------------------------------------
+  69          // MeasureAndReadTemperature
+  70          //---------------------------------------------------------------------------
+  71          //
+  72          // Description - commands the offchip temperature/humidity sensor to measure temperature
+  73          //
+  74          //
+  75          // return - returns the measured temperature value.
+  76          uint16_t MeasureAndReadTemperature()
+  77          {
+  78   1              return SendSensorCommand(0xE3, 1);
+  79   1      }
+  80          
+  81          //---------------------------------------------------------------------------
+  82          // ReadTemperature
+  83          //---------------------------------------------------------------------------
+  84          //
+  85          // Description - reads the last measured temperature from the offchip temperature/humidity sensor sensor
+  86          //
+  87          //
+  88          // return - returns the last measured temperature value.
+  89          uint16_t ReadTemperature()
+  90          {
+  91   1          return SendSensorCommand(0xE0, 1);  //original value was 0xE0
+  92   1      }
+  93          
+  94          //---------------------------------------------------------------------------
+  95          // MeasureAndReadHumidity
+  96          //---------------------------------------------------------------------------
+  97          //
+  98          // Description - commands the offchip temperature/humidity sensor to measure humidity.
+  99          // Note - This sensor measures both temperature and humidity when commanded to measure humidity.
+ 100          //
+ 101          //
+ 102          // return - returns the measured humidity value.
+ 103          uint16_t MeasureAndReadHumidity()
+ 104          {
+ 105   1          return SendSensorCommand(0xE5, 1);  //original value was 0xE5
+ 106   1      }
+ 107          
+ 108          //---------------------------------------------------------------------------
+ 109          // SendSensorCommand
+ 110          //---------------------------------------------------------------------------
+ 111          //
+C51 COMPILER V9.53.0.0   SMBUS                                                             12/12/2017 13:32:32 PAGE 3   
+
+ 112          // Description - sends a hex value command to the sensor
+ 113          //
+ 114          // command - the hex value of a command that the offchip temperature/humidity sensor is to perform
+ 115          //
+ 116          //
+ 117          // return - returns the measured humidity value.
+ 118          uint16_t SendSensorCommand(uint8_t command, bool readback)
+ 119          {
+ 120   1          uint16_t result;
+ 121   1      
+ 122   1          // SMBus Write Sequence
+ 123   1          SMB_DATA_OUT = command;          // Define next outgoing byte
+ 124   1          TARGET = SLAVE_ADDR;             // Target the EFM8 Slave for next
+ 125   1                                           // SMBus transfer
+ 126   1          SMB_Write();                     // Initiate SMBus write
+ 127   1      
+ 128   1          if (readback == 1)
+ 129   1          {
+ 130   2              // SMBus Read Sequence
+ 131   2              TARGET = SLAVE_ADDR;         // Target the EFM8 Slave for next
+ 132   2                                           // SMBus transfer
+ 133   2              SMB_Read();
+ 134   2              result = SMB_DATA_IN;
+ 135   2              result = result << 8;
+ 136   2              SMB_Read();
+ 137   2              result += SMB_DATA_IN;
+ 138   2          }
+ 139   1          else
+ 140   1          {
+ 141   2              result = 0;
+ 142   2          }
+ 143   1      
+ 144   1          return result;
+ 145   1      }
+ 146          
+ 147          //-----------------------------------------------------------------------------
+ 148          // SMB_Write
+ 149          //-----------------------------------------------------------------------------
+ 150          //
+ 151          // Return Value : None
+ 152          // Parameters   : None
+ 153          //
+ 154          // Writes a single byte to the slave with address specified by the <TARGET>
+ 155          // variable.
+ 156          // Calling sequence:
+ 157          // 1) Write target slave address to the <TARGET> variable
+ 158          // 2) Write outgoing data to the <SMB_DATA_OUT> variable
+ 159          // 3) Call SMB_Write()
+ 160          //
+ 161          //-----------------------------------------------------------------------------
+ 162          void SMB_Write (void)
+ 163          {
+ 164   1              while (SMB_BUSY);                   // Wait for SMBus to be free.
+ 165   1              SMB_BUSY = 1;                       // Claim SMBus (set to busy)
+ 166   1              SMB_RW = 0;                         // Mark this transfer as a WRITE
+ 167   1              SMB0CN0_STA = 1;                     // Start transfer
+ 168   1      }
+ 169          
+ 170          //-----------------------------------------------------------------------------
+ 171          // SMB_Read
+ 172          //-----------------------------------------------------------------------------
+ 173          //
+ 174          // Return Value : None
+C51 COMPILER V9.53.0.0   SMBUS                                                             12/12/2017 13:32:32 PAGE 4   
+
+ 175          // Parameters   : None
+ 176          //
+ 177          // Reads a single byte from the slave with address specified by the <TARGET>
+ 178          // variable.
+ 179          // Calling sequence:
+ 180          // 1) Write target slave address to the <TARGET> variable
+ 181          // 2) Call SMB_Write()
+ 182          // 3) Read input data from <SMB_DATA_IN> variable
+ 183          //
+ 184          //-----------------------------------------------------------------------------
+ 185          void SMB_Read (void)
+ 186          {
+ 187   1              while (SMB_BUSY != 0);              // Wait for bus to be free.
+ 188   1              SMB_BUSY = 1;                       // Claim SMBus (set to busy)
+ 189   1              SMB_RW = 1;                         // Mark this transfer as a READ
+ 190   1      
+ 191   1              SMB0CN0_STA = 1;                     // Start transfer
+ 192   1      
+ 193   1              while (SMB_BUSY);                   // Wait for transfer to complete
+ 194   1      }
+ 195          //-----------------------------------------------------------------------------
+ 196          // End Of File
+ 197          //-----------------------------------------------------------------------------
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    110    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =      5       2
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      2       1
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
